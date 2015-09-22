@@ -10,9 +10,9 @@ All code is GPLv2 licensed unless explicitly stated otherwise.
 Building
 --------
 
-Use Black-Swift [VirtualBox VM] (http://www.black-swift.com/wiki/index.php?title=C/C%2B%2B_Building_and_Remote_Debugging_with_Eclipse)
-In virtual machine change directory to /home/openwrt/openwrt
-Copy sources to package/bsb_ili9341/ directory, for example
+Use Black-Swift [VirtualBox VM] (http://www.black-swift.com/wiki/index.php?title=C/C%2B%2B_Building_and_Remote_Debugging_with_Eclipse)<br>
+In virtual machine change directory to /home/openwrt/openwrt<br>
+Copy sources to package/bsb_ili9341/ directory, for example<br>
 
 Run and say yes for new bsb_ili9341 package:
 ```make oldconfig```
@@ -59,9 +59,9 @@ ili.write("1234567890", x=1, y=20, color=0x0fff)
 Methods
 -------
 
-    ILI9341(bus, address, pin_dc, pin_reset)
+    ILI9341(bus, chip_select, pin_dc, pin_reset)
 
-Connects to the specified SPI bus specified pins
+Connects to the specified SPI bus and pins
 
     clear()
 
@@ -71,7 +71,7 @@ Clear LCD display.
 
 Draws pixel at specified location and color on LCD display.
 
-    rgb2color(r, g, b)
+	rgb2color(r, g, b)
 
 Convert RGB to internal color.
 
@@ -95,7 +95,7 @@ Draws vertical line at specified location, length and color on LCD display.
 
 Draws horisontal line at specified location, length and color on LCD display.
 
-    triangle(x0, y0, x1, y1, x2, y2, color)
+    "triangle(x0, y0, x1, y1, x2, y2, color)
 
 Draws triangle at specified location and color on LCD display.
 

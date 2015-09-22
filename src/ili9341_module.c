@@ -26,8 +26,7 @@
 #include <linux/spi/spidev.h>
 #include "fonts.h"
 
-#define GPIO_ADDR 0x18040000	// base address
-#define GPIO_BLOCK 48			// memory block size
+#define SYSFS_GPIO_DIR "/sys/class/gpio"
 
 #define INPUT	0
 #define OUTPUT	1
@@ -43,6 +42,7 @@ typedef struct {
 	PyObject_HEAD
 	
 	int fd;	/* open file descriptor: /dev/spiX.X */	
+	int fd_dc, fd_reset;
 	
 	int pin_reset;
 	int pin_dc;
@@ -63,17 +63,19 @@ static PyMemberDef ili9341_members[] = {
 	{NULL}  /* Sentinel */
 };
 
-static unsigned long *gpioAddress;
-static int gpioSetup();
+
+static int gpioExport(int gpio);
 static int gpioSetDirection(int gpio, int direction);
-static void gpioSet(int gpio, int value);
+static int gpioOpenSet(int gpio);
+static void gpioCloseSet(int gpio_fd);
+static void gpioSet(int gpio_fd, int value);
 
-#define TFT_DC_LOW		gpioSet(self->pin_dc, 0)
-#define TFT_DC_HIGH		gpioSet(self->pin_dc, 1)
-#define TFT_RST_LOW		gpioSet(self->pin_reset, 0)
-#define TFT_RST_HIGH	gpioSet(self->pin_reset, 1)
+#define TFT_DC_LOW		gpioSet(self->fd_dc, 0)
+#define TFT_DC_HIGH		gpioSet(self->fd_dc, 1)
+#define TFT_RST_LOW		gpioSet(self->fd_reset, 0)
+#define TFT_RST_HIGH	gpioSet(self->fd_reset, 1)
 
-static void TFT_sendByte(ILI9341PyObject *self, int data);
+static void TFT_sendByte(ILI9341PyObject *self, char data);
 static void TFT_sendCMD(ILI9341PyObject *self, int index);
 static void TFT_sendDATA(ILI9341PyObject *self, int data);
 static void TFT_sendWord(ILI9341PyObject *self, int data);
@@ -90,22 +92,18 @@ static void swap(int *a, int *b);
 static int
 ili9341_init(ILI9341PyObject *self, PyObject *args, PyObject *kwds) {
 	int i;
-	int device, bus, pin_dc, pin_reset;
+	int bus, chip_select, pin_dc, pin_reset;
 	char path[SPIDEV_MAXPATH];
-	static char *kwlist[] = {"device", "bus", "dc", "reset", NULL};
+	static char *kwlist[] = {"bus", "chip_select", "dc", "reset", NULL};
 
-	if (!PyArg_ParseTupleAndKeywords(args, kwds, "iiii", kwlist, &device, &bus, &pin_dc, &pin_reset))
+	if (!PyArg_ParseTupleAndKeywords(args, kwds, "iiii", kwlist, &bus, &chip_select, &pin_dc, &pin_reset))
 		return -1;
 
-	if (snprintf(path, SPIDEV_MAXPATH, "/dev/spidev%d.%d", device, bus) >= SPIDEV_MAXPATH) {
+	if (snprintf(path, SPIDEV_MAXPATH, "/dev/spidev%d.%d", bus, chip_select) >= SPIDEV_MAXPATH) {
 		return -1;
 	}
-	
+
 	if ((self->fd = open(path, O_RDWR)) < 0) {
-		return -1;
-	}
-
-	if (gpioSetup() < 0) {
 		return -1;
 	}
 
@@ -113,8 +111,13 @@ ili9341_init(ILI9341PyObject *self, PyObject *args, PyObject *kwds) {
 	self->pin_dc = pin_dc;
 	self->pin_reset = pin_reset;
 
+	gpioExport(self->pin_dc);
 	gpioSetDirection(self->pin_dc, OUTPUT);
+	self->fd_dc = gpioOpenSet(self->pin_dc);
+
+	gpioExport(self->pin_reset);
 	gpioSetDirection(self->pin_reset, OUTPUT);
+	self->fd_reset = gpioOpenSet(self->pin_reset);
 
 	self->width = TFT_MAX_X;
 	self->height = TFT_MAX_Y;
@@ -126,13 +129,13 @@ ili9341_init(ILI9341PyObject *self, PyObject *args, PyObject *kwds) {
 	self->font = System5x7;
 	self->char_spacing = 1;
 
-    TFT_DC_HIGH;
+	TFT_DC_HIGH;
 
 	TFT_RST_LOW;
 	for(i=0; i<0x7FFFFF; i++);
 	TFT_RST_HIGH;
 
-    TFT_sendCMD(self, 0xCB);
+	TFT_sendCMD(self, 0xCB);
 	TFT_sendDATA(self, 0x39);
 	TFT_sendDATA(self, 0x2C);
 	TFT_sendDATA(self, 0x00);
@@ -241,32 +244,21 @@ ili9341_init(ILI9341PyObject *self, PyObject *args, PyObject *kwds) {
 
 static PyObject *
 ili9341_clear(ILI9341PyObject *self, PyObject *unused) {
-	int i, max = ((TFT_MAX_X + 1) * (TFT_MAX_Y + 1));
+	unsigned char *sendBuffer;
+	unsigned char *receiveBuffer;
+    struct spi_ioc_transfer xfer;
+	int i, bytes = ((TFT_MAX_X + 1) * (TFT_MAX_Y + 1));
 
 	TFT_setCol(self, 0, TFT_MAX_X);
-    TFT_setPage(self, 0, TFT_MAX_Y);
-    TFT_sendCMD(self, 0x2c);	// start to write to display ram
+	TFT_setPage(self, 0, TFT_MAX_Y);
+	TFT_sendCMD(self, 0x2c);	// start to write to display ram
 
-    TFT_DC_HIGH;
+	TFT_DC_HIGH;
 
-    for(i=0; i<max; i++)
-    {
-    	TFT_sendWord(self, 0);
-    }
-/*
-	unsigned char sendBuffer[(TFT_MAX_X + 1) * (TFT_MAX_Y + 1)], receiveBuffer[(TFT_MAX_X + 1) * (TFT_MAX_Y + 1)];
-    struct spi_ioc_transfer xfer;
-	int bytes = (TFT_MAX_X + 1) * (TFT_MAX_Y + 1);
+	for(i=0; i<bytes; i++) {
+		TFT_sendWord(self, 0);
+	}
 
-	memset(&sendBuffer, 0, sizeof(sendBuffer));
-	memset(&receiveBuffer, 0, sizeof(receiveBuffer));
-	memset(&xfer, 0, sizeof(xfer));
-    xfer.tx_buf = (unsigned long)sendBuffer;
-    xfer.rx_buf = (unsigned long)receiveBuffer;
-    xfer.len = max;
-
-    int res = ioctl(self->fd, SPI_IOC_MESSAGE(1), &xfer);
-*/
 	Py_RETURN_NONE;
 }
 
@@ -284,7 +276,6 @@ ili9341_rgb2color(ILI9341PyObject *self, PyObject *args) {
 	
 	return Py_BuildValue("i", rgb);
 }
-
 
 static PyObject *
 ili9341_drawPixel(ILI9341PyObject *self, PyObject *args) {
@@ -638,64 +629,74 @@ ili9341_writeString(ILI9341PyObject *self, PyObject *args, PyObject *kwds) {
 
 
 static
-int gpioSetup() {
-    int  m_mfd;
-    if ((m_mfd = open("/dev/mem", O_RDWR)) < 0) {
-        return -1;
-    }
-    gpioAddress = (unsigned long*)mmap(NULL, GPIO_BLOCK, PROT_READ|PROT_WRITE, MAP_SHARED, m_mfd, GPIO_ADDR);
-    close(m_mfd);
+int gpioExport(int gpio) {
+	int fd, len;
+	char buf[255];
 
-    if (gpioAddress == MAP_FAILED) {
-		printf("MAP_FAILED\n");
-        return -2;
-    }
-
-    return 0;
+	fd = open(SYSFS_GPIO_DIR "/export", O_WRONLY);
+	if (fd) {
+		len = snprintf(buf, sizeof(buf), "%d", gpio);
+		write(fd, buf, len);
+		close(fd);
+	}
 }
 
 static
 int gpioSetDirection(int gpio, int direction) {
-    unsigned long value = *(gpioAddress + 0); // obtain current settings
-    if (direction == 1)
-    {
-        value |= (1 << gpio); // set bit to 1
-    }
-    else
-    {
-        value &= ~(1 << gpio); // clear bit
-    }
-    *(gpioAddress + 0) = value;
+	int fd, len;
+	char buf[255];
 
-    return value;
+	snprintf(buf, sizeof(buf), SYSFS_GPIO_DIR "/gpio%d/direction", gpio);
+    fd = open(buf, O_WRONLY);
+	
+	if (fd) {
+		if (direction) {
+			write(fd, "out", 3);
+		}
+		else {
+			write(fd, "in", 2);
+		}
+		close(fd);
+	}
 }
 
 static
-void gpioSet(int gpio, int value) {
-    if (value == 0)
-    {
-        *(gpioAddress + 4) = (1 << gpio);
-    }
-    else
-    {
-        *(gpioAddress + 3) = (1 << gpio);
-    }
+int gpioOpenSet(int gpio) {
+	char buf[255];
+
+	snprintf(buf, sizeof(buf), SYSFS_GPIO_DIR "/gpio%d/value", gpio);
+
+	return open(buf, O_WRONLY);
 }
 
 static
-void TFT_sendByte(ILI9341PyObject *self, int data) {
-	unsigned char sendBuffer[2],  receiveBuffer[2];
+void gpioCloseSet(int gpio_fd) {
+	if (gpio_fd) {
+		close(gpio_fd);
+	}
+}
+
+static
+void gpioSet(int gpio_fd, int value) {
+	if (gpio_fd) {
+		if (value) {
+			write(gpio_fd, "1", 2);
+		}
+		else {
+			write(gpio_fd, "0", 2);
+		}
+	}
+}
+
+static
+void TFT_sendByte(ILI9341PyObject *self, char data) {
     struct spi_ioc_transfer xfer;
-	int bytes = 1;
-
-	sendBuffer[0] = data;
-    
+   
 	memset(&xfer, 0, sizeof(xfer));
-    xfer.tx_buf = (unsigned long)sendBuffer;
-    xfer.rx_buf = (unsigned long)receiveBuffer;
-    xfer.len = bytes;
+    xfer.tx_buf = (unsigned long)&data;
+    xfer.len = sizeof(char);
 
-    int res = ioctl(self->fd, SPI_IOC_MESSAGE(1), &xfer);
+    ioctl(self->fd, SPI_IOC_MESSAGE(1), &xfer);
 }
 
 static
@@ -928,7 +929,7 @@ static PyTypeObject ILI9341ObjectType = {
 	0,				/* tp_setattro    */
 	0,				/* tp_as_buffer   */
 	Py_TPFLAGS_DEFAULT,		/* tp_flags       */
-	"ILI9341(device, bus, pin_dc, pin_reset) -> LCD\n\nReturn a new ILI9341 object that is connected to the specified bus and pins.\n",	/* tp_doc         */
+	"ILI9341(bus, chip_select, pin_dc, pin_reset) -> LCD\n\nReturn a new ILI9341 object that is connected to the specified bus and pins.\n",	/* tp_doc         */
 	0,				/* tp_traverse       */
 	0,				/* tp_clear          */
 	0,				/* tp_richcompare    */
