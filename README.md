@@ -40,7 +40,7 @@ Example program
 ```python
 from ili9341 import *
 
-ili = ILI9341(1, 0, 21, 26) // /dev/spidev1.0, GPIO21 - D/C, GPIO26 - RESET
+ili = ILI9341(1, 0, 21, 26) # /dev/spidev1.0, GPIO21 - D/C, GPIO26 - RESET
 
 ili.clear()
 
@@ -68,10 +68,6 @@ Connects to the specified SPI bus and pins
 
 Clear LCD display.
 
-    pixel(x, y, color)
-
-Draws pixel at specified location and color on LCD display.
-
 	invert(mode)
 
 Invert LCD display
@@ -79,6 +75,10 @@ Invert LCD display
 	rgb2color(r, g, b)
 
 Convert RGB to internal color.
+
+    pixel(x, y, color)
+
+Draws pixel at specified location and color on LCD display.
 
     circle(x0, y0, radius, color)
 
