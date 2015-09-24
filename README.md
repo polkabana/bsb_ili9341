@@ -3,19 +3,18 @@ Python ILI9341
 
 This project contains a python module for interfacing with ILI9341 TFT LCD display via SPI bus.
 
-Partially based on Adafruit Arduino code
+Partially based on Adafruit Arduino code.
 
 All code is GPLv2 licensed unless explicitly stated otherwise.
 
 Building
 --------
 
-Use Black-Swift [VirtualBox VM] (http://www.black-swift.com/wiki/index.php?title=C/C%2B%2B_Building_and_Remote_Debugging_with_Eclipse)<br>
-In virtual machine change directory to /home/openwrt/openwrt<br>
-Copy sources to package/bsb_ili9341/ directory, for example<br>
+Use Black-Swift [VirtualBox VM] (http://www.black-swift.com/wiki/index.php?title=C/C%2B%2B_Building_and_Remote_Debugging_with_Eclipse) for building.<br>
+In virtual machine change directory to /home/openwrt/openwrt.<br>
+Copy sources to package/bsb_ili9341/ directory, for example.<br>
 
-Run and say yes for new bsb_ili9341 package:
-```make oldconfig```
+Run ```make oldconfig``` and say yes for new bsb_ili9341 package.
 
 Run for compile package:
 ```make *package/bsb_ili9341/compile V=s*.```
@@ -36,12 +35,12 @@ This mean that SCK connected to GPIO18, MOSI to GPIO19, MISO to GPIO 20 and CS t
 
 
 
-Example programm
+Example program
 
 ```python
 from ili9341 import *
 
-ili = ILI9341(1, 0, 21, 26)
+ili = ILI9341(1, 0, 21, 26) // /dev/spidev1.0, GPIO21 - D/C, GPIO26 - RESET
 
 ili.clear()
 
@@ -54,6 +53,8 @@ ili.rect(50,50,150,150,0xff00)
 ili.char('1', x=1, y=1, color=0x0fff)
 ili.font("ArialBlack24")
 ili.write("1234567890", x=1, y=20, color=0x0fff)
+
+ili.invert(1)
 ```
 
 Methods
@@ -70,6 +71,10 @@ Clear LCD display.
     pixel(x, y, color)
 
 Draws pixel at specified location and color on LCD display.
+
+	invert(mode)
+
+Invert LCD display
 
 	rgb2color(r, g, b)
 

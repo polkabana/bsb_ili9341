@@ -25,6 +25,7 @@
 #include <linux/types.h>
 #include <linux/spi/spidev.h>
 #include "fonts.h"
+#include "ili9341.h"
 
 #define SYSFS_GPIO_DIR "/sys/class/gpio"
 
@@ -32,11 +33,6 @@
 #define OUTPUT	1
 
 #define SPIDEV_MAXPATH	128
-
-#define TFT_MIN_X	0
-#define TFT_MIN_Y	0
-#define TFT_MAX_X	239
-#define TFT_MAX_Y	319
 
 typedef struct {
 	PyObject_HEAD
@@ -48,12 +44,13 @@ typedef struct {
 	int pin_dc;
 	int width;
 	int height;
+	int rotation;
 
 	unsigned char *font;
 	int color, bg_color, char_spacing;
 	int cursor_x;
 	int cursor_y;
-	} ILI9341PyObject;
+} ILI9341PyObject;
 
 static PyMemberDef ili9341_members[] = {
 	{"cursor_x", T_INT, offsetof(ILI9341PyObject, cursor_x), 0,
@@ -119,8 +116,8 @@ ili9341_init(ILI9341PyObject *self, PyObject *args, PyObject *kwds) {
 	gpioSetDirection(self->pin_reset, OUTPUT);
 	self->fd_reset = gpioOpenSet(self->pin_reset);
 
-	self->width = TFT_MAX_X;
-	self->height = TFT_MAX_Y;
+	self->width = ILI9341_TFTWIDTH;
+	self->height = ILI9341_TFTHEIGHT;
 	self->color = 0xffff;
 	self->bg_color = 0;
 	self->cursor_x = 0;
@@ -135,13 +132,18 @@ ili9341_init(ILI9341PyObject *self, PyObject *args, PyObject *kwds) {
 	for(i=0; i<0x7FFFFF; i++);
 	TFT_RST_HIGH;
 
+	TFT_sendCMD(self, 0xEF);
+	TFT_sendDATA(self, 0x03);
+	TFT_sendDATA(self, 0x80);
+	TFT_sendDATA(self, 0x02);
+  
 	TFT_sendCMD(self, 0xCB);
 	TFT_sendDATA(self, 0x39);
 	TFT_sendDATA(self, 0x2C);
 	TFT_sendDATA(self, 0x00);
 	TFT_sendDATA(self, 0x34);
 	TFT_sendDATA(self, 0x02);
-
+  
 	TFT_sendCMD(self, 0xCF);
 	TFT_sendDATA(self, 0x00);
 	TFT_sendDATA(self, 0xC1);
@@ -165,30 +167,30 @@ ili9341_init(ILI9341PyObject *self, PyObject *args, PyObject *kwds) {
 	TFT_sendCMD(self, 0xF7);
 	TFT_sendDATA(self, 0x20);
 
-	TFT_sendCMD(self, 0xC0);    	//Power control
+	TFT_sendCMD(self, ILI9341_PWCTR1);    	//Power control
 	TFT_sendDATA(self, 0x23);   	//VRH[5:0]
 
-	TFT_sendCMD(self, 0xC1);    	//Power control
+	TFT_sendCMD(self, ILI9341_PWCTR2);    	//Power control
 	TFT_sendDATA(self, 0x10);   	//SAP[2:0];BT[3:0]
 
-	TFT_sendCMD(self, 0xC5);    	//VCM control
+	TFT_sendCMD(self, ILI9341_VMCTR1);    	//VCM control
 	TFT_sendDATA(self, 0x3e);   	//Contrast
 	TFT_sendDATA(self, 0x28);
 
-	TFT_sendCMD(self, 0xC7);    	//VCM control2
+	TFT_sendCMD(self, ILI9341_VMCTR2);    	//VCM control2
 	TFT_sendDATA(self, 0x86);  	 //--
 
-	TFT_sendCMD(self, 0x36);    	// Memory Access Control
-	TFT_sendDATA(self, 0x48);  	//C8	   //48 68???//28 E8 ???
+	TFT_sendCMD(self, ILI9341_MADCTL);    	// Memory Access Control
+	TFT_sendDATA(self, MADCTL_MX | MADCTL_BGR);
 
-	TFT_sendCMD(self, 0x3A);
+	TFT_sendCMD(self, ILI9341_PIXFMT);
 	TFT_sendDATA(self, 0x55);
 
-	TFT_sendCMD(self, 0xB1);
+	TFT_sendCMD(self, ILI9341_FRMCTR1);
 	TFT_sendDATA(self, 0x00);
 	TFT_sendDATA(self, 0x18);
 
-	TFT_sendCMD(self, 0xB6);    	// Display Function Control
+	TFT_sendCMD(self, ILI9341_DFUNCTR);    	// Display Function Control
 	TFT_sendDATA(self, 0x08);
 	TFT_sendDATA(self, 0x82);
 	TFT_sendDATA(self, 0x27);
@@ -196,10 +198,10 @@ ili9341_init(ILI9341PyObject *self, PyObject *args, PyObject *kwds) {
 	TFT_sendCMD(self, 0xF2);    	// 3Gamma Function Disable
 	TFT_sendDATA(self, 0x00);
 
-	TFT_sendCMD(self, 0x26);    	//Gamma curve selected
+	TFT_sendCMD(self, ILI9341_GAMMASET);    	//Gamma curve selected
 	TFT_sendDATA(self, 0x01);
 
-	TFT_sendCMD(self, 0xE0);    	//Set Gamma
+	TFT_sendCMD(self, ILI9341_GMCTRP1);    	//Set Gamma
 	TFT_sendDATA(self, 0x0F);
 	TFT_sendDATA(self, 0x31);
 	TFT_sendDATA(self, 0x2B);
@@ -216,7 +218,7 @@ ili9341_init(ILI9341PyObject *self, PyObject *args, PyObject *kwds) {
 	TFT_sendDATA(self, 0x09);
 	TFT_sendDATA(self, 0x00);
 
-	TFT_sendCMD(self, 0xE1);    	//Set Gamma
+	TFT_sendCMD(self, ILI9341_GMCTRN1);    	//Set Gamma
 	TFT_sendDATA(self, 0x00);
 	TFT_sendDATA(self, 0x0E);
 	TFT_sendDATA(self, 0x14);
@@ -233,10 +235,10 @@ ili9341_init(ILI9341PyObject *self, PyObject *args, PyObject *kwds) {
 	TFT_sendDATA(self, 0x36);
 	TFT_sendDATA(self, 0x0F);
 
-	TFT_sendCMD(self, 0x11);    	//Exit Sleep
+	TFT_sendCMD(self, ILI9341_SLPOUT);    	//Exit Sleep
 	for(i=0; i<0x7FFFFF; i++);
 
-	TFT_sendCMD(self, 0x29);    //Display on
+	TFT_sendCMD(self, ILI9341_DISPON);    //Display on
 	TFT_sendCMD(self, 0x2c);
 
 	return 0;
@@ -247,10 +249,10 @@ ili9341_clear(ILI9341PyObject *self, PyObject *unused) {
 	unsigned char *sendBuffer;
 	unsigned char *receiveBuffer;
     struct spi_ioc_transfer xfer;
-	int i, bytes = ((TFT_MAX_X + 1) * (TFT_MAX_Y + 1));
+	int i, bytes = (ILI9341_TFTWIDTH * ILI9341_TFTHEIGHT);
 
-	TFT_setCol(self, 0, TFT_MAX_X);
-	TFT_setPage(self, 0, TFT_MAX_Y);
+	TFT_setCol(self, 0, self->width);
+	TFT_setPage(self, 0, self->height);
 	TFT_sendCMD(self, 0x2c);	// start to write to display ram
 
 	TFT_DC_HIGH;
@@ -258,6 +260,57 @@ ili9341_clear(ILI9341PyObject *self, PyObject *unused) {
 	for(i=0; i<bytes; i++) {
 		TFT_sendWord(self, 0);
 	}
+
+	Py_RETURN_NONE;
+}
+
+static PyObject *
+ili9341_rotation(ILI9341PyObject *self, PyObject *args) {
+	int mode;
+	
+	if (!PyArg_ParseTuple(args, "i", &mode)) {
+		return NULL;
+	}
+
+	self->rotation = mode % 4;
+
+	TFT_sendCMD(self, ILI9341_MADCTL);
+
+	switch (self->rotation) {
+		case 0:
+			TFT_sendCMD(self, MADCTL_MX | MADCTL_BGR);
+			self->width  = ILI9341_TFTWIDTH;
+			self->height = ILI9341_TFTHEIGHT;
+			break;
+		case 1:
+			TFT_sendCMD(self, MADCTL_MV | MADCTL_BGR);
+			self->width  = ILI9341_TFTHEIGHT;
+			self->height = ILI9341_TFTWIDTH;
+			break;
+		case 2:
+			TFT_sendCMD(self, MADCTL_MY | MADCTL_BGR);
+			self->width  = ILI9341_TFTWIDTH;
+			self->height = ILI9341_TFTHEIGHT;
+			break;
+		case 3:
+			TFT_sendCMD(self, MADCTL_MX | MADCTL_MY | MADCTL_MV | MADCTL_BGR);
+			self->width  = ILI9341_TFTHEIGHT;
+			self->height = ILI9341_TFTWIDTH;
+			break;
+	}
+
+	Py_RETURN_NONE;
+}
+
+static PyObject *
+ili9341_invert(ILI9341PyObject *self, PyObject *args) {
+	int mode;
+	
+	if (!PyArg_ParseTuple(args, "i", &mode)) {
+		return NULL;
+	}
+
+	TFT_sendCMD(self, mode ? ILI9341_INVON : ILI9341_INVOFF);
 
 	Py_RETURN_NONE;
 }
@@ -515,14 +568,15 @@ ili9341_setCursor(ILI9341PyObject *self, PyObject *args) {
 		return NULL;
 	}
 
-	if (x <= TFT_MAX_X)
+	if (x <= self->width)
 		self->cursor_x = x;
 
-	if (y <= TFT_MAX_Y)
+	if (y <= self->height)
 		self->cursor_y = y;
 
 	Py_RETURN_NONE;
 }
+
 
 static PyObject *
 ili9341_setColor(ILI9341PyObject *self, PyObject *args) {
@@ -872,6 +926,10 @@ void swap(int *a, int *b) {
 static PyMethodDef ili9341_methods[] = {
 	{"clear", (PyCFunction)ili9341_clear, METH_NOARGS,
 		"clear()\n\n Clear LCD display."},
+	{"rotation", (PyCFunction)ili9341_rotation, METH_VARARGS,
+		"rotation(mode)\n\n Set rotation mode (0-3)."},
+	{"invert", (PyCFunction)ili9341_invert, METH_VARARGS,
+		"invert(mode)\n\n Invert LCD display."},
 	{"rgb2color", (PyCFunction)ili9341_rgb2color, METH_VARARGS,
 		"rgb2color(r, g, b)\n\n Convert RGB to internal color."},
 	{"pixel", (PyCFunction)ili9341_drawPixel, METH_VARARGS,
