@@ -21,7 +21,7 @@ Run ```make oldconfig``` and say yes for new bsb_ili9341 package.
 Run for compile package:
 ```make *package/bsb_ili9341/compile V=s*.```
 
-Check bin/ar71xx/packages/base/ for results (like ssd1306-i2c_0.1-1_ar71xx.ipk)
+Check bin/ar71xx/packages/base/ for results (like ili9341_0.2-1_ar71xx.ipk)
 
 Usage
 -----
@@ -51,8 +51,8 @@ ili.jpeg("cat.jpg", x=10, y=100)
 ili.pixel(10,10, 0xffff)
 ili.circle_fill(200, 200, 50, 0xf00f)
 ili.circle(100, 100, 50, 0xfff0)
-ili.triangle(50,50,70,70,150,150,0xff00)
-ili.rect(50,50,150,150,0xff00)
+ili.triangle(50, 50, 70, 70, 150, 150, 0xff00)
+ili.rect(50, 50, 150, 150, ili.rgb2color(255, 127, 63))
 
 ili.char('1', x=1, y=1, color=0x0fff)
 ili.font("ArialBlack24")
