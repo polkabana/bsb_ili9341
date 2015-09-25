@@ -10,9 +10,11 @@ All code is GPLv2 licensed unless explicitly stated otherwise.
 Building
 --------
 
-Use Black-Swift [VirtualBox VM] (http://www.black-swift.com/wiki/index.php?title=C/C%2B%2B_Building_and_Remote_Debugging_with_Eclipse) for building.<br>
-In virtual machine change directory to /home/openwrt/openwrt.<br>
-Copy sources to package/bsb_ili9341/ directory, for example.<br>
+Use Black-Swift [VirtualBox VM] (http://www.black-swift.com/wiki/index.php?title=C/C%2B%2B_Building_and_Remote_Debugging_with_Eclipse) for building.
+
+In virtual machine change directory to /home/openwrt/openwrt.
+
+Copy sources to package/bsb_ili9341/ directory, for example.
 
 Run ```make oldconfig``` and say yes for new bsb_ili9341 package.
 
@@ -43,6 +45,8 @@ from ili9341 import *
 ili = ILI9341(1, 0, 21, 26) # /dev/spidev1.0, GPIO21 - D/C, GPIO26 - RESET
 
 ili.clear()
+
+ili.jpeg("cat.jpg", x=10, y=100)
 
 ili.pixel(10,10, 0xffff)
 ili.circle_fill(200, 200, 50, 0xf00f)
@@ -135,3 +139,7 @@ Draw char at current or specified position with current font and size.
     write(string, x=0, y=0, color=1)
 
 Draw string at current or specified position with current font and size.
+
+	jpeg(filename, x=0, y=0)
+	
+Show jpeg file at current or specified position.

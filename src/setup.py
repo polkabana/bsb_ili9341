@@ -22,5 +22,5 @@ setup(	name	= "ili9341",
 	license		= "GPLv2",
 	classifiers	= classifiers,
 	url		= "https://github.com/polkabana/bsb_ili9341",
-	ext_modules	= [Extension("ili9341", ["ili9341_module.c"])]
+	ext_modules	= [Extension("ili9341", ["ili9341_module.c", "nanojpeg.c"])]
 )

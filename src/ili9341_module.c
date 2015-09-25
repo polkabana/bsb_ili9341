@@ -19,13 +19,15 @@
 #include <structmember.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <unistd.h>
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/ioctl.h>
 #include <linux/types.h>
 #include <linux/spi/spidev.h>
-#include "fonts.h"
 #include "ili9341.h"
+#include "fonts.h"
+#include "nanojpeg.h"
 
 #define SYSFS_GPIO_DIR "/sys/class/gpio"
 
@@ -88,7 +90,6 @@ static void swap(int *a, int *b);
 
 static int
 ili9341_init(ILI9341PyObject *self, PyObject *args, PyObject *kwds) {
-	int i;
 	int bus, chip_select, pin_dc, pin_reset;
 	char path[SPIDEV_MAXPATH];
 	static char *kwlist[] = {"bus", "chip_select", "dc", "reset", NULL};
@@ -108,13 +109,22 @@ ili9341_init(ILI9341PyObject *self, PyObject *args, PyObject *kwds) {
 	self->pin_dc = pin_dc;
 	self->pin_reset = pin_reset;
 
-	gpioExport(self->pin_dc);
-	gpioSetDirection(self->pin_dc, OUTPUT);
-	self->fd_dc = gpioOpenSet(self->pin_dc);
+	if (gpioExport(self->pin_dc) < 0) {
+		return -1;
+	}
 
-	gpioExport(self->pin_reset);
+	gpioSetDirection(self->pin_dc, OUTPUT);
+	if ((self->fd_dc = gpioOpenSet(self->pin_dc)) < 0) {
+		return -1;
+	}
+
+	if (gpioExport(self->pin_reset) < 0) {
+		return -1;
+	}
 	gpioSetDirection(self->pin_reset, OUTPUT);
-	self->fd_reset = gpioOpenSet(self->pin_reset);
+	if ((self->fd_reset = gpioOpenSet(self->pin_reset)) < 0) {
+		return -1;
+	}
 
 	self->width = ILI9341_TFTWIDTH;
 	self->height = ILI9341_TFTHEIGHT;
@@ -129,7 +139,7 @@ ili9341_init(ILI9341PyObject *self, PyObject *args, PyObject *kwds) {
 	TFT_DC_HIGH;
 
 	TFT_RST_LOW;
-	for(i=0; i<0x7FFFFF; i++);
+	usleep(100);
 	TFT_RST_HIGH;
 
 	TFT_sendCMD(self, 0xEF);
@@ -236,7 +246,7 @@ ili9341_init(ILI9341PyObject *self, PyObject *args, PyObject *kwds) {
 	TFT_sendDATA(self, 0x0F);
 
 	TFT_sendCMD(self, ILI9341_SLPOUT);    	//Exit Sleep
-	for(i=0; i<0x7FFFFF; i++);
+	usleep(100);
 
 	TFT_sendCMD(self, ILI9341_DISPON);    //Display on
 	TFT_sendCMD(self, 0x2c);
@@ -681,10 +691,58 @@ ili9341_writeString(ILI9341PyObject *self, PyObject *args, PyObject *kwds) {
 	Py_RETURN_NONE;
 }
 
+static PyObject *
+ili9341_showJpeg(ILI9341PyObject *self, PyObject *args, PyObject *kwds) {
+	int x = self->cursor_x, y = self->cursor_y;
+	int fd;
+	unsigned char *filename;
+	long int jpg_size = 0, nRead = 0;
+	unsigned char *jpg;
+	static char *kwlist[] = {"str", "x", "y", NULL};
+	unsigned char *font = self->font;
+	
+	if (!PyArg_ParseTupleAndKeywords(args, kwds, "s|ii", kwlist, &filename, &x, &y)) {
+		return NULL;
+	}
+
+	self->cursor_x = x;
+	self->cursor_y = y;
+
+	if ((fd = open(filename, O_RDONLY)) < 0) {
+		Py_RETURN_NONE;
+	}
+	
+	jpg_size = lseek(fd, 0, SEEK_END);
+	lseek(fd, 0, SEEK_SET);
+
+	jpg = malloc(jpg_size);
+	nRead = read(fd, jpg, jpg_size);
+
+	if (nRead) {
+		njInit();
+		njDecode(jpg, jpg_size);
+
+		unsigned char *prgb = njGetImage();
+
+		for (y=njGetHeight()-1; y!=-1; y--) {
+			for (x=0; x<njGetWidth(); ++x){
+				unsigned char *d = prgb + (y * njGetWidth() + x) * njGetNComp();
+
+				TFT_setPixel(self, self->cursor_x + x, self->cursor_y + y, TFT_rgb2color(self, d[0], d[1], d[2]));
+			}
+		}
+		njDone();
+	}
+	
+	free(jpg);
+
+	Py_RETURN_NONE;
+}
+
 
 static
 int gpioExport(int gpio) {
-	int fd, len;
+	int fd, len, ret = -1;
 	char buf[255];
 
 	fd = open(SYSFS_GPIO_DIR "/export", O_WRONLY);
@@ -692,12 +750,15 @@ int gpioExport(int gpio) {
 		len = snprintf(buf, sizeof(buf), "%d", gpio);
 		write(fd, buf, len);
 		close(fd);
+		ret = 0;
 	}
+
+	return ret;
 }
 
 static
 int gpioSetDirection(int gpio, int direction) {
-	int fd, len;
+	int fd, len, ret = -1;
 	char buf[255];
 
 	snprintf(buf, sizeof(buf), SYSFS_GPIO_DIR "/gpio%d/direction", gpio);
@@ -711,7 +772,10 @@ int gpioSetDirection(int gpio, int direction) {
 			write(fd, "in", 2);
 		}
 		close(fd);
+		ret = 0;
 	}
+
+	return ret;
 }
 
 static
@@ -798,13 +862,13 @@ static
 int TFT_rgb2color(ILI9341PyObject *self, int R, int G, int B) {
 	int rgb;
 
-	rgb = R & 0x1F;
+	/*rgb = R & 0x1F;
 	rgb <<= 6;
 	rgb |= G & 0x3F;
 	rgb <<= 5;
-	rgb |= B & 0x1F;
+	rgb |= B & 0x1F;*/
 	
-	// rgb = ((R & 0xF8) << 8) | ((G & 0xFC) << 3) | (B >> 3);
+	rgb = ((R & 0xF8) << 8) | ((G & 0xFC) << 3) | (B >> 3);
 
 	return rgb;
 }
@@ -962,6 +1026,8 @@ static PyMethodDef ili9341_methods[] = {
 		"char(ch, x=0, y=0, color=1)\n\n Draw char at current or specified position with current font and size."},
 	{"write", (PyCFunction)ili9341_writeString, METH_VARARGS | METH_KEYWORDS,
 		"write(string, x=0, y=0, color=1)\n\n Draw string at current or specified position with current font and size."},
+	{"jpeg", (PyCFunction)ili9341_showJpeg, METH_VARARGS | METH_KEYWORDS,
+		"jpeg(filename, x=0, y=0)\n\n Show jpeg file at current or specified position."},
 	{NULL}
 };
 
