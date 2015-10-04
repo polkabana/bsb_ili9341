@@ -104,7 +104,7 @@ Draws vertical line at specified location, length and color on LCD display.
 
 Draws horisontal line at specified location, length and color on LCD display.
 
-    "triangle(x0, y0, x1, y1, x2, y2, color)
+    triangle(x0, y0, x1, y1, x2, y2, color)
 
 Draws triangle at specified location and color on LCD display.
 
